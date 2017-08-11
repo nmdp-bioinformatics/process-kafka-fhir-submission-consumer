@@ -86,7 +86,7 @@ public class FhirSubmissionHandler implements KafkaMessageHandler, Closeable {
         LinkedBlockingQueue<WorkItem> queue = getWorkQueue(senderKey);
 
         try {
-            queue.add(new WorkItem(payload));
+            queue.add(new WorkItem(convertPayloadToFhirMessage(payload)));
         } catch (Exception e) {
             LOG.error("Error parsing message " + topic + "-" + DF.get().format(partition) + ":" + DF.get().format(offset), e);
             return;
@@ -108,29 +108,26 @@ public class FhirSubmissionHandler implements KafkaMessageHandler, Closeable {
 
     private void commitWork(List<WorkItem> work) throws IOException {
         try {
-            work.stream()
-                    .filter(Objects::nonNull)
-                    .forEach(item -> convertHmlToFhir(item));
+
         } catch (Exception ex) {
             LOG.error("Error processing table: ", ex);
         }
     }
 
-    private void convertHmlToFhir(WorkItem item) {
+    private FhirMessage convertPayloadToFhirMessage(byte[] payload) {
+        FhirMessage fhirMessage = null;
+
         try {
             Gson gson = OBJECT_MAPPER.get().create();
-            String kafkaMessage = new String(item.getPayload());
+            String kafkaMessage = new String(payload);
             JsonObject kafkaJson = gson.fromJson(kafkaMessage, JsonObject.class);
             JsonObject kafkaPayloadJson = kafkaJson.getAsJsonObject("payload");
-
-            if (kafkaPayloadJson.has("model")) {
-
-            } else {
-
-            }
+            fhirMessage = gson.fromJson(kafkaPayloadJson.get("model").getAsString(), FhirMessage.class);
         } catch (Exception ex) {
             LOG.error("Error converting HML to FHIR.", ex);
         }
+
+        return fhirMessage;
     }
 
     private org.bson.Document getConversionStatus(String conversionId) throws Exception {
@@ -170,14 +167,14 @@ public class FhirSubmissionHandler implements KafkaMessageHandler, Closeable {
     }
 
     private static class WorkItem {
-        private final byte[] payload;
+        private final FhirMessage fhirMessage;
 
-        public WorkItem(byte[] payload) {
-            this.payload = payload;
+        public WorkItem(FhirMessage fhirMessage) {
+            this.fhirMessage = fhirMessage;
         }
 
-        public byte[] getPayload() {
-            return payload;
+        public FhirMessage getPayload() {
+            return fhirMessage;
         }
     }
 }
