@@ -109,6 +109,11 @@ public class FhirSubmissionHandler implements KafkaMessageHandler, Closeable {
 
     private void commitWork(List<WorkItem> work) throws IOException {
         try {
+            FhirMessageUtil util = new FhirMessageUtil();
+
+            for (WorkItem item : work) {
+                util.submit(item.getPayload());
+            }
 
         } catch (Exception ex) {
             LOG.error("Error processing table: ", ex);
