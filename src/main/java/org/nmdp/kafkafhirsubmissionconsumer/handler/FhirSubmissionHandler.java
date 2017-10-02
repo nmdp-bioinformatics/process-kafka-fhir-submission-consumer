@@ -40,6 +40,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 
+import org.nmdp.fhirsubmission.object.HmlSubmission;
 import org.nmdp.fhirsubmission.util.FhirMessageUtil;
 import org.nmdp.hmlfhirconvertermodels.domain.fhir.FhirMessage;
 import org.nmdp.hmlfhirmongo.mongo.MongoConversionStatusDatabase;
@@ -112,7 +113,7 @@ public class FhirSubmissionHandler implements KafkaMessageHandler, Closeable {
             FhirMessageUtil util = new FhirMessageUtil();
 
             for (WorkItem item : work) {
-                util.submit(item.getPayload());
+                List<HmlSubmission> submissions = util.submit(item.getPayload());
             }
 
         } catch (Exception ex) {
