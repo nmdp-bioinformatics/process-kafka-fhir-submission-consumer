@@ -40,10 +40,10 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 
-import org.nmdp.fhirsubmission.object.HmlSubmission;
 import org.nmdp.fhirsubmission.util.FhirMessageUtil;
 import org.nmdp.hmlfhirconvertermodels.domain.fhir.FhirMessage;
 import org.nmdp.hmlfhirmongo.mongo.MongoConversionStatusDatabase;
+import org.nmdp.hmlfhirmongo.mongo.MongoFhirSubmissionDatabase;
 import org.nmdp.kafkaconsumer.handler.KafkaMessageHandler;
 import org.nmdp.hmlfhirmongo.config.MongoConfiguration;
 
@@ -61,6 +61,7 @@ public class FhirSubmissionHandler implements KafkaMessageHandler, Closeable {
 
     private final MongoConfiguration mongoConfiguration;
     private final MongoConversionStatusDatabase mongoConversionStatusDatabase;
+    private final MongoFhirSubmissionDatabase mongoFhirSubmissionDatabase;
     private final ConcurrentMap<String, LinkedBlockingQueue<WorkItem>> workQueueMap;
 
     public FhirSubmissionHandler() throws IOException {
@@ -71,7 +72,8 @@ public class FhirSubmissionHandler implements KafkaMessageHandler, Closeable {
             mongoConfiguration = yaml.loadAs(is, MongoConfiguration.class);
         }
 
-        mongoConversionStatusDatabase = new MongoConversionStatusDatabase(mongoConfiguration);
+        this.mongoConversionStatusDatabase = new MongoConversionStatusDatabase(mongoConfiguration);
+        this.mongoFhirSubmissionDatabase = new MongoFhirSubmissionDatabase(mongoConfiguration);
     }
 
     private String getSenderKey(String topic, int partition) {
@@ -111,11 +113,13 @@ public class FhirSubmissionHandler implements KafkaMessageHandler, Closeable {
     private void commitWork(List<WorkItem> work) throws IOException {
         try {
             FhirMessageUtil util = new FhirMessageUtil();
+            List<org.nmdp.hmlfhirmongo.models.FhirSubmission> fhirSubmissions = new ArrayList<>();
 
             for (WorkItem item : work) {
-                List<HmlSubmission> submissions = util.submit(item.getPayload());
+                fhirSubmissions.add(util.submit(item.getPayload()));
             }
 
+            writeFhirResources(fhirSubmissions);
         } catch (Exception ex) {
             LOG.error("Error processing table: ", ex);
         }
@@ -135,6 +139,17 @@ public class FhirSubmissionHandler implements KafkaMessageHandler, Closeable {
         }
 
         return fhirMessage;
+    }
+
+    private void writeFhirResources(List<org.nmdp.hmlfhirmongo.models.FhirSubmission> results) {
+        try {
+            Map<String, String> fhirSubmissionFhirCorrelation = new HashMap<>();
+            results.forEach(result -> fhirSubmissionFhirCorrelation.put(
+                    mongoFhirSubmissionDatabase.save(result).getId(), result.getId()));
+        } catch (Exception ex) {
+            LOG.error("Error updating mongo with submission results.", ex);
+            throw ex;
+        }
     }
 
     private org.bson.Document getConversionStatus(String conversionId) throws Exception {
