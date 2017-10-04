@@ -40,6 +40,8 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 
+import org.bson.Document;
+import org.nmdp.fhirsubmission.FhirSubmission;
 import org.nmdp.fhirsubmission.util.FhirMessageUtil;
 import org.nmdp.hmlfhirconvertermodels.domain.fhir.FhirMessage;
 import org.nmdp.hmlfhirmongo.mongo.MongoConversionStatusDatabase;
@@ -116,7 +118,11 @@ public class FhirSubmissionHandler implements KafkaMessageHandler, Closeable {
             List<org.nmdp.hmlfhirmongo.models.FhirSubmission> fhirSubmissions = new ArrayList<>();
 
             for (WorkItem item : work) {
-                fhirSubmissions.add(util.submit(item.getPayload()));
+                FhirMessage message = item.getPayload();
+                org.nmdp.hmlfhirmongo.models.FhirSubmission submission = util.submit(message);
+
+                submission.setFhirMessage(message);
+                fhirSubmissions.add(submission);
             }
 
             writeFhirResources(fhirSubmissions);
@@ -141,29 +147,33 @@ public class FhirSubmissionHandler implements KafkaMessageHandler, Closeable {
         return fhirMessage;
     }
 
-    private void writeFhirResources(List<org.nmdp.hmlfhirmongo.models.FhirSubmission> results) {
+    private void writeFhirResources(List<org.nmdp.hmlfhirmongo.models.FhirSubmission> results) throws Exception {
         try {
-            Map<String, String> fhirSubmissionFhirCorrelation = new HashMap<>();
-            results.forEach(result -> fhirSubmissionFhirCorrelation.put(
-                    mongoFhirSubmissionDatabase.save(result).getId(), result.getId()));
+            for (org.nmdp.hmlfhirmongo.models.FhirSubmission result : results) {
+                FhirMessage fhirMessage = result.getFhirMessage();
+                String submissionId = mongoFhirSubmissionDatabase.save(result).getId();
+                Document conversionStatus = getConversionStatusByFhirId(fhirMessage.getFhirId());
+                String conversionId = conversionStatus.get("_id").toString();
+                updateConversionStatusCompleted(fhirMessage, conversionId, submissionId, true);
+            }
         } catch (Exception ex) {
             LOG.error("Error updating mongo with submission results.", ex);
             throw ex;
         }
     }
 
-    private org.bson.Document getConversionStatus(String conversionId) throws Exception {
+    private org.bson.Document getConversionStatusByFhirId(String fhirId) throws Exception {
         try {
-            return mongoConversionStatusDatabase.get(conversionId);
+            return mongoConversionStatusDatabase.getByFhirId(fhirId);
         } catch (Exception ex) {
             LOG.error("Error retrieving status from mongo", ex);
             throw ex;
         }
     }
 
-    private void updateConversionStatusCompleted(FhirMessage fhir, String id, Boolean success) {
+    private void updateConversionStatusCompleted(FhirMessage fhir, String id, String submissionId, Boolean success) {
         try {
-            mongoConversionStatusDatabase.update(id, success, fhir);
+            mongoConversionStatusDatabase.update(id, success, fhir, submissionId);
         } catch (Exception ex) {
             LOG.error("Error updating mongo complete", ex);
         }
